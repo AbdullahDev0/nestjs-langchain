@@ -19,7 +19,7 @@
  *                            chat conversation, and uses LangchainChatService for processing.
  */
 
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
 import { LangchainChatService } from './langchain-chat.service';
 import { BasicMessageDto } from './dtos/basic-message.dto';
 import { ContextAwareMessagesDto } from './dtos/context-aware-messages.dto';
@@ -42,5 +42,11 @@ export class LangchainChatController {
     return await this.langchainChatService.contextAwareChat(
       contextAwareMessagesDto,
     );
+  }
+
+  @Get('load-pdf')
+  @HttpCode(200)
+  async loadPDF() {
+    return await this.langchainChatService.loadPDF();
   }
 }
