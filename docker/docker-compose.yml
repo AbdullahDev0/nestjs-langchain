@@ -1,0 +1,14 @@
+
+version: '1.0'
+services:
+  db:
+    hostname: 127.0.0.1
+    image: pgvector/pgvector:pg16
+    ports:
+      - 5434:5432
+    environment:
+      - POSTGRES_DB=pgvector-db
+      - POSTGRES_USER=pgvector
+      - POSTGRES_PASSWORD=admin
+    volumes:
+      - ./init.sql:/docker-entrypoint/init.sql

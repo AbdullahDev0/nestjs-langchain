@@ -22,7 +22,13 @@
  *                            through HttpExceptions.
  */
 
-import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { BasicMessageDto } from './dtos/basic-message.dto';
 import { PromptTemplate } from '@langchain/core/prompts';
 import { ChatOpenAI } from '@langchain/openai';
@@ -34,8 +40,17 @@ import { openAI } from 'src/utils/constants/openAI.constants';
 import { ContextAwareMessagesDto } from './dtos/context-aware-messages.dto';
 import { Message as VercelChatMessage } from 'ai';
 
+import { existsSync } from 'fs';
+import { PDFLoader } from 'langchain/document_loaders/fs/pdf';
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+import { VectorStoreService } from 'src/services/vector-store.service';
+import * as path from 'path';
+import { Document } from '@langchain/core/documents';
+
 @Injectable()
 export class LangchainChatService {
+  constructor(private vectorStoreService: VectorStoreService) {}
+
   async basicChat(basicMessageDto: BasicMessageDto) {
     try {
       const prompt = PromptTemplate.fromTemplate(TEMPLATES.BASIC_CHAT_TEMPLATE);
@@ -81,6 +96,49 @@ export class LangchainChatService {
       });
       return this.successResponse(response);
     } catch (e: unknown) {
+      this.exceptionHandling(e);
+    }
+  }
+
+
+  async loadPDF() {
+    try {
+      const file = 'src/pdfs/2312.10997.pdf';
+      const resolvedPath = path.resolve(file);
+      // Check if the file exists
+      if (!existsSync(resolvedPath)) {
+        throw new BadRequestException('File does not exist.');
+      }
+
+      // Load the PDF using PDFLoader
+      const pdfLoader = new PDFLoader(resolvedPath);
+      const pdf = await pdfLoader.load();
+
+      // Split the PDF into texts using RecursiveCharacterTextSplitter
+      const textSplitter = new RecursiveCharacterTextSplitter({
+        chunkSize: 1000,
+        chunkOverlap: 50,
+      });
+      const texts = await textSplitter.splitDocuments(pdf);
+      let embeddings: Document[] = [];
+
+      for (let index = 0; index < texts.length; index++) {
+        const page = texts[index];
+        const splitTexts = await textSplitter.splitText(page.pageContent);
+        const pageEmbeddings = splitTexts.map((text) => ({
+          pageContent: text,
+          metadata: {
+            pageNumber: index,
+          },
+        }));
+        embeddings = embeddings.concat(pageEmbeddings);
+      }
+      await this.vectorStoreService.addDocuments(embeddings);
+
+      return await this.vectorStoreService.similaritySearch('naive rag', 3);
+    } catch (e: unknown) {
+      console.log(e);
+
       this.exceptionHandling(e);
     }
   }
