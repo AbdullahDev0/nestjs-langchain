@@ -17,6 +17,11 @@
  *                                       to maintain context. This template allows the
  *                                       AI to generate responses that are coherent and
  *                                       contextually relevant in multi-turn dialogues.
+ *
+ *  @member DOCUMENT_CONTEXT_CHAT_TEMPLATE - Template for chat interactions that require responses based on a specific
+ *                                          document context. This template is structured to focus the AI's attention
+ *                                          on the provided context, enabling it to generate informed responses to questions
+ *                                          with regard to the document's content.
  */
 
 export enum TEMPLATES {
@@ -30,4 +35,9 @@ export enum TEMPLATES {
    
    User: {input}
    AI:`,
+
+  DOCUMENT_CONTEXT_CHAT_TEMPLATE = `Answer the question based only on the following context:
+   {context}
+   
+   Question: {question}`,
 }
