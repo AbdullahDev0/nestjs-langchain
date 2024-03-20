@@ -36,7 +36,10 @@
 
 import { Injectable } from '@nestjs/common';
 import { OpenAIEmbeddings } from '@langchain/openai';
-import { DistanceStrategy, PGVectorStore } from '@langchain/community/vectorstores/pgvector';
+import {
+  DistanceStrategy,
+  PGVectorStore,
+} from '@langchain/community/vectorstores/pgvector';
 import * as pg from 'pg';
 import { Document } from '@langchain/core/documents';
 import { PoolConfig } from 'pg';
@@ -47,10 +50,11 @@ export class VectorStoreService {
   private pool: pg.Pool;
 
   async onModuleInit() {
-    const { postgresConnectionOptions, tableName, columns, distanceStrategy } = config;
+    const { postgresConnectionOptions, tableName, columns, distanceStrategy } =
+      config;
     this.pool = new pg.Pool(postgresConnectionOptions);
     await this.ensureDatabaseSchema();
-  
+
     const pgVectorConfig = {
       pool: this.pool,
       tableName,
@@ -62,7 +66,6 @@ export class VectorStoreService {
       new OpenAIEmbeddings(),
       pgVectorConfig,
     );
-
   }
 
   private async ensureDatabaseSchema() {
@@ -77,16 +80,15 @@ export class VectorStoreService {
         ${config.columns.metadataColumnName} JSONB
       );
     `;
-    // Create requried extensions first
-    await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
-    await client.query('CREATE EXTENSION IF NOT EXISTS vector')
+      // Create requried extensions first
+      await client.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+      await client.query('CREATE EXTENSION IF NOT EXISTS vector');
       await client.query(query);
     } finally {
       client.release();
     }
   }
 
-  
   async addDocuments(documents: Document[]): Promise<void> {
     await this.pgvectorStore.addDocuments(documents);
   }
@@ -100,23 +102,22 @@ export class VectorStoreService {
   }
 }
 
-
 // Define the config
 const config = {
   postgresConnectionOptions: {
-    type: "postgres",
+    type: 'postgres',
     host: '127.0.0.1',
     port: 5434,
     user: 'pgvector',
     password: 'admin',
     database: 'pgvector-db',
   } as PoolConfig,
-  tableName: "testlangchain",
+  tableName: 'testlangchain',
   columns: {
-    idColumnName: "id",
-    vectorColumnName: "vector",
-    contentColumnName: "content",
-    metadataColumnName: "metadata",
+    idColumnName: 'id',
+    vectorColumnName: 'vector',
+    contentColumnName: 'content',
+    metadataColumnName: 'metadata',
   },
-  distanceStrategy: "cosine" as DistanceStrategy,
+  distanceStrategy: 'cosine' as DistanceStrategy,
 };

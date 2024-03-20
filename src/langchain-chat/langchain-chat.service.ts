@@ -1,25 +1,32 @@
 /**
  * Service for handling Langchain Chat operations.
  *
- * This service is responsible for processing user chat messages by leveraging
- * OpenAI's language models. It transforms the user's input using a prompt template,
- * sends it to the ChatOpenAI model for processing, and then formats the response
- * appropriately before sending it back to the user. The service handles both basic
- * and context-aware chat interactions.
+ * This service facilitates various types of chat interactions using OpenAI's language models.
+ * It supports basic chat, context-aware chat, document context chat, and PDF uploading functionalities.
+ * Basic chat and context-aware chat utilize pre-defined templates for processing user queries,
+ * whereas document chat leverages document context for more nuanced responses.
+ * The PDF upload feature processes and stores PDF content for document context chats.
  *
  * @class LangchainChatService
- * @decorator Injectable - Marks the class as a service that can be injected.
  *
- * @method basicChat - Processes a user's chat message using a basic chat template. It
- *                     structures the prompt, sends it to the OpenAI model, and formats
- *                     the output into a human-readable response. Handles errors by
- *                     throwing HttpExceptions.
+ * @method basicChat - Processes a basic chat message using a predefined template, sends it to the OpenAI model for a response, and formats the response. Handles errors with HttpExceptions.
+ * @param {BasicMessageDto} basicMessageDto - Data Transfer Object containing the user's query.
+ * @returns Formatted response from the OpenAI model.
  *
- * @method contextAwareChat - Processes chat messages considering the context of previous
- *                            interactions. It uses a context-aware template to structure
- *                            the prompt, considering past messages for a more coherent
- *                            and contextually relevant response. Also handles errors
- *                            through HttpExceptions.
+ * @method contextAwareChat - Processes messages with consideration for the context of previous interactions, using a context-aware template for coherent responses. Handles errors with HttpExceptions.
+ * @param {ContextAwareMessagesDto} contextAwareMessagesDto - Data Transfer Object containing the user’s current message and the chat history.
+ * @returns Contextually relevant response from the OpenAI model.
+ *
+ * @method documentChat - Processes a chat message with context derived from document similarity search, using a document-context template. Handles errors with HttpExceptions.
+ * @param {BasicMessageDto} basicMessageDto - Data Transfer Object containing the user's query.
+ * @returns Response from the OpenAI model, contextualized with document information.
+ *
+ * @method uploadPDF - Processes a PDF file by loading, splitting into text, and storing its content for later use in document context chats. Handles file existence verification and errors with HttpExceptions.
+ * @param {DocumentDto} documentDto - Data Transfer Object containing the file path of the PDF to be processed.
+ * @returns Success message upon successful PDF processing and storage.
+ *
+ * The class utilizes several internal methods for operations such as loading chat chains, formatting messages, generating success responses, and handling exceptions.
+ * These methods interact with external libraries and services, including the OpenAI API, file system operations, and custom utilities for message formatting and response generation.
  */
 
 import {
@@ -46,6 +53,8 @@ import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
 import { VectorStoreService } from 'src/services/vector-store.service';
 import * as path from 'path';
 import { Document } from '@langchain/core/documents';
+import { DocumentDto } from './dtos/document.dto';
+import { PDF_BASE_PATH } from 'src/utils/constants/common.constants';
 
 @Injectable()
 export class LangchainChatService {
@@ -53,15 +62,7 @@ export class LangchainChatService {
 
   async basicChat(basicMessageDto: BasicMessageDto) {
     try {
-      const prompt = PromptTemplate.fromTemplate(TEMPLATES.BASIC_CHAT_TEMPLATE);
-
-      const model = new ChatOpenAI({
-        temperature: +openAI.BASIC_CHAT_OPENAI_TEMPERATURE,
-        modelName: openAI.GPT_3_5_TURBO_1106.toString(),
-      });
-
-      const outputParser = new HttpResponseOutputParser();
-      const chain = prompt.pipe(model).pipe(outputParser);
+      const chain = this.loadSingleChain(TEMPLATES.BASIC_CHAT_TEMPLATE);
       const response = await chain.invoke({
         input: basicMessageDto.user_query,
       });
@@ -73,23 +74,14 @@ export class LangchainChatService {
 
   async contextAwareChat(contextAwareMessagesDto: ContextAwareMessagesDto) {
     try {
-      const prompt = PromptTemplate.fromTemplate(
-        TEMPLATES.CONTEXT_AWARE_CHAT_TEMPLATE,
-      );
-
       const messages = contextAwareMessagesDto.messages ?? [];
       const formattedPreviousMessages = messages
         .slice(0, -1)
         .map(this.formatMessage);
       const currentMessageContent = messages[messages.length - 1].content;
 
-      const model = new ChatOpenAI({
-        temperature: +openAI.BASIC_CHAT_OPENAI_TEMPERATURE,
-        modelName: openAI.GPT_3_5_TURBO_1106.toString(),
-      });
+      const chain = this.loadSingleChain(TEMPLATES.CONTEXT_AWARE_CHAT_TEMPLATE);
 
-      const outputParser = new HttpResponseOutputParser();
-      const chain = prompt.pipe(model).pipe(outputParser);
       const response = await chain.invoke({
         chat_history: formattedPreviousMessages.join('\n'),
         input: currentMessageContent,
@@ -100,10 +92,31 @@ export class LangchainChatService {
     }
   }
 
-
-  async loadPDF() {
+  async documentChat(basicMessageDto: BasicMessageDto) {
     try {
-      const file = 'src/pdfs/2312.10997.pdf';
+      const documentContext = await this.vectorStoreService.similaritySearch(
+        basicMessageDto.user_query,
+        3,
+      );
+
+      const chain = this.loadSingleChain(
+        TEMPLATES.DOCUMENT_CONTEXT_CHAT_TEMPLATE,
+      );
+
+      const response = await chain.invoke({
+        context: JSON.stringify(documentContext),
+        question: basicMessageDto.user_query,
+      });
+      return this.successResponse(response);
+    } catch (e: unknown) {
+      this.exceptionHandling(e);
+    }
+  }
+
+  async uploadPDF(documentDto: DocumentDto) {
+    try {
+      // Load the file
+      const file = PDF_BASE_PATH + '/' + documentDto.file;
       const resolvedPath = path.resolve(file);
       // Check if the file exists
       if (!existsSync(resolvedPath)) {
@@ -134,14 +147,25 @@ export class LangchainChatService {
         embeddings = embeddings.concat(pageEmbeddings);
       }
       await this.vectorStoreService.addDocuments(embeddings);
-
-      return await this.vectorStoreService.similaritySearch('naive rag', 3);
+      return customMessage(HttpStatus.OK, MESSAGES.SUCCESS);
     } catch (e: unknown) {
       console.log(e);
 
       this.exceptionHandling(e);
     }
   }
+
+  private loadSingleChain = (template: string) => {
+    const prompt = PromptTemplate.fromTemplate(template);
+
+    const model = new ChatOpenAI({
+      temperature: +openAI.BASIC_CHAT_OPENAI_TEMPERATURE,
+      modelName: openAI.GPT_3_5_TURBO_1106.toString(),
+    });
+
+    const outputParser = new HttpResponseOutputParser();
+    return prompt.pipe(model).pipe(outputParser);
+  };
 
   private formatMessage = (message: VercelChatMessage) =>
     `${message.role}: ${message.content}`;
