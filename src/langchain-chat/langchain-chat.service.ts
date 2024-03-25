@@ -43,7 +43,7 @@ import { HttpResponseOutputParser } from 'langchain/output_parsers';
 import { TEMPLATES } from 'src/utils/constants/templates.constants';
 import customMessage from 'src/utils/responses/customMessage.response';
 import { MESSAGES } from 'src/utils/constants/messages.constants';
-import { openAI } from 'src/utils/constants/openAI.constants';
+import { openAI, vercelRoles } from 'src/utils/constants/openAI.constants';
 import { ContextAwareMessagesDto } from './dtos/context-aware-messages.dto';
 import { Message as VercelChatMessage } from 'ai';
 
@@ -55,6 +55,14 @@ import * as path from 'path';
 import { Document } from '@langchain/core/documents';
 import { DocumentDto } from './dtos/document.dto';
 import { PDF_BASE_PATH } from 'src/utils/constants/common.constants';
+import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
+import { AgentExecutor, createOpenAIFunctionsAgent } from 'langchain/agents';
+import {
+  ChatPromptTemplate,
+  MessagesPlaceholder,
+} from '@langchain/core/prompts';
+import { pull } from 'langchain/hub';
+import { HumanMessage, AIMessage } from 'langchain/schema';
 
 @Injectable()
 export class LangchainChatService {
@@ -155,6 +163,52 @@ export class LangchainChatService {
     }
   }
 
+  async agentChat(contextAwareMessagesDto: ContextAwareMessagesDto) {
+    try {
+      const tools = [new TavilySearchResults({ maxResults: 1 })];
+
+      const messages = contextAwareMessagesDto.messages ?? [];
+      const formattedPreviousMessages = messages
+        .slice(0, -1)
+        .map(this.formatBaseMessages);
+      const currentMessageContent = messages[messages.length - 1].content;
+
+      const prompt = ChatPromptTemplate.fromMessages([
+        [
+          'system',
+          'You are an agent that follows SI system standards and responds responds normally',
+        ],
+        new MessagesPlaceholder({ variableName: 'chat_history' }),
+        ['user', '{input}'],
+        new MessagesPlaceholder({ variableName: 'agent_scratchpad' }),
+      ]);
+
+      const llm = new ChatOpenAI({
+        temperature: +openAI.BASIC_CHAT_OPENAI_TEMPERATURE,
+        modelName: openAI.GPT_3_5_TURBO_1106.toString(),
+      });
+
+      const agent = await createOpenAIFunctionsAgent({
+        llm,
+        tools,
+        prompt,
+      });
+
+      const agentExecutor = new AgentExecutor({
+        agent,
+        tools,
+      });
+
+      const response = await agentExecutor.invoke({
+        input: currentMessageContent,
+        chat_history: formattedPreviousMessages,
+      });
+      return customMessage(HttpStatus.OK, MESSAGES.SUCCESS, response.output);
+    } catch (e: unknown) {
+      this.exceptionHandling(e);
+    }
+  }
+
   private loadSingleChain = (template: string) => {
     const prompt = PromptTemplate.fromTemplate(template);
 
@@ -169,6 +223,11 @@ export class LangchainChatService {
 
   private formatMessage = (message: VercelChatMessage) =>
     `${message.role}: ${message.content}`;
+
+  private formatBaseMessages = (message: VercelChatMessage) =>
+    message.role === vercelRoles.user
+      ? new HumanMessage({ content: message.content, additional_kwargs: {} })
+      : new AIMessage({ content: message.content, additional_kwargs: {} });
 
   private successResponse = (response: Uint8Array) =>
     customMessage(
